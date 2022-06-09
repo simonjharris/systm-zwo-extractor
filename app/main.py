@@ -1,23 +1,33 @@
 import shutil
 import os
 import re
+from pathlib import Path
 
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import uvicorn
-from starlette.background import BackgroundTask
 
 import suffersync
 
 app = FastAPI()
 
 
-def cleanup():
-    shutil.rmtree('zwo')
-    os.remove('zwo_files.zip')
+def cleanup() -> None:
+    """
+    Files shouldn't persist between instances, but in case they do this will remove them.
+    """
+    if Path('zwo_files.zip').exists():
+        os.remove('zwo_files.zip')
+    if Path('zwo').exists():
+        shutil.rmtree('zwo')
 
 
-def reformat_files():
+def reformat_files() -> None:
+    """
+    Some files have blank lines at the top, this will remove them.
+    Files have 'commented out' tags on some lines e.g. <!-- abs power: 100 -->,
+    these need to be removed or the files are rejected by RGT.
+    """
     for file in os.listdir('zwo'):
         filepath = os.path.join('zwo', file)
 
@@ -33,28 +43,34 @@ def reformat_files():
                 else:
                     fileout.append(line)
 
+        # Check xml tag is present on first line
         if 'xml' not in fileout[0]:
             fileout.insert(0, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
 
+        # rewrite processed file
         with open(filepath, 'w') as f:
             f.writelines(fileout)
 
 
 @app.get('/sufferfest')
 async def get_zwo_files(systm_username: str = Query(None, alias='systm-username'),
-                        systm_password: str = Query(None, alias='systm-password')) -> HTMLResponse or JSONResponse:
-    try:
-        cleanup()
-    except:
-        pass
+                        systm_password: str = Query(None, alias='systm-password')
+                        ) -> HTMLResponse or JSONResponse:
+
+    # cleanup any files from previous requests
+    cleanup()
 
     try:
+        # Run suffersync script, will catch AttributeError for incorrect password
         suffersync.main(systm_username, systm_password)
     except AttributeError:
-        return JSONResponse({'error': 'Incorrect SYSTM Username or Password'}, status_code=401)
+        return JSONResponse({'error': 'Incorrect SYSTM Username or Password'},
+                            status_code=401)
 
+    # check file format
     reformat_files()
 
+    # zip all the files
     shutil.make_archive('zwo_files', 'zip', 'zwo')
     html = """
     <html>
@@ -67,6 +83,7 @@ async def get_zwo_files(systm_username: str = Query(None, alias='systm-username'
         </body>
     </html>
     """
+    # return download link
     return HTMLResponse(html)
 
 
@@ -76,7 +93,5 @@ async def return_files() -> FileResponse:
 
 
 if __name__ == '__main__':
-    try:
-        cleanup()
-    finally:
-        uvicorn.run(app, host='0.0.0.0', port=8080)
+    cleanup()
+    uvicorn.run(app, host='0.0.0.0', port=8080)
