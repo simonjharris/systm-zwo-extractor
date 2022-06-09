@@ -88,7 +88,9 @@ async def get_zwo_files(systm_username: str = Query(None, alias='systm-username'
 
 
 @app.get('/zwo_files')
-async def return_files() -> FileResponse:
+async def return_files() -> FileResponse or JSONResponse:
+    if not Path('zwo_files.zip').exists():
+        return JSONResponse({'error': 'Not found'}, status_code=404)
     return FileResponse('zwo_files.zip')
 
 
